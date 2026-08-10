@@ -1,0 +1,68 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #070a14;
+  color: #e6ebf5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0f1c;
+}
+::-webkit-scrollbar-thumb {
+  background: #243056;
+  border-radius: 6px;
+  border: 2px solid #0b0f1c;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #34406b;
+}
+
+.glass {
+  background: linear-gradient(180deg, rgba(19,26,46,0.72), rgba(11,15,28,0.72));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.shimmer-bg {
+  background: linear-gradient(90deg, #131a2e 0%, #1a2340 50%, #131a2e 100%);
+  background-size: 1000px 100%;
+}
+
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(36,48,86,0.22) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(36,48,86,0.22) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.glow-brand {
+  box-shadow: 0 0 0 1px rgba(16,162,244,0.25), 0 0 30px rgba(16,162,244,0.18);
+}
+.glow-teal {
+  box-shadow: 0 0 0 1px rgba(20,184,166,0.28), 0 0 26px rgba(20,184,166,0.18);
+}
+.glow-rose {
+  box-shadow: 0 0 0 1px rgba(244,63,94,0.28), 0 0 26px rgba(244,63,94,0.16);
+}
+.glow-amber {
+  box-shadow: 0 0 0 1px rgba(245,158,11,0.25), 0 0 22px rgba(245,158,11,0.14);
+}
