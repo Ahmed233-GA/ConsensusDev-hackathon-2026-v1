@@ -1,4 +1,5 @@
-.venv/
+﻿.venv/
+venv/
 __pycache__/
 *.pyc
 .env
@@ -6,4 +7,3 @@ __pycache__/
 .vscode/
 .coverage
 coverage.json
-.vscode/
