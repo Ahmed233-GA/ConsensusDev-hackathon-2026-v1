@@ -20,14 +20,13 @@ class SecurityAgent(BaseReviewAgent):
         super().__init__(name="security", weight=weight)
 
     async def evaluate(self, diff: str, context: Dict[str, Any]) -> AgentEvaluation:
-        diff_meta = self.extract_diff_metadata(diff)
         scanner_payload = context.get("security", {})
 
-        # System prompt for LLM Model
         system_prompt = (
             "You are a Principal Application Security Engineer reviewing a Pull Request diff. "
             "Detect vulnerabilities including SQL Injection (CWE-89), XSS (CWE-79), Command Injection (CWE-78), "
             "hardcoded secrets/credentials, insecure deserialization, and dangerous standard library calls. "
+            "You MUST incorporate and cross-verify with any static scanner findings (Checkov/Trivy) provided.\n\n"
             "You MUST respond ONLY with valid JSON in this exact structure:\n"
             "{\n"
             '  "score": <integer from 0 to 100>,\n'
@@ -39,18 +38,19 @@ class SecurityAgent(BaseReviewAgent):
         )
 
         user_prompt = (
-            f"PR Diff:\n```diff\n{diff}\n```\n\n"
+            f"PR Unified Diff:\n```diff\n{diff}\n```\n\n"
             f"Static Security Scanner (Checkov/Trivy) Findings:\n{json.dumps(scanner_payload, indent=2)}\n\n"
-            "Analyze security posture and return the JSON response."
+            "Perform security review using your LLM reasoning and return the JSON response."
         )
 
-        # 1. Execute LLM Model Call via OpenRouter
+        # Call OpenRouter / Cloud LLM
         llm_response = await self.call_llm(system_prompt, user_prompt)
+
         if llm_response and "score" in llm_response:
             score = int(llm_response.get("score", 100))
             critical_issues = list(llm_response.get("critical_issues", []))
             passed = bool(llm_response.get("passed", score >= 80 and len(critical_issues) == 0))
-            feedback = str(llm_response.get("feedback", "Clean - no security issues found"))
+            feedback = str(llm_response.get("feedback", "Clean - no secrets or CVEs found"))
 
             return AgentEvaluation(
                 agent_name=self.name,
@@ -61,65 +61,34 @@ class SecurityAgent(BaseReviewAgent):
                 suggestions=list(llm_response.get("suggestions", [])),
             )
 
-        # 2. Fallback when running offline without API keys
-        return self._heuristic_analysis(diff_meta, scanner_payload)
-
-    def _heuristic_analysis(
-        self, diff_meta: Dict[str, Any], scanner_payload: Dict[str, Any]
-    ) -> AgentEvaluation:
-        critical_issues: List[str] = []
-        suggestions: List[str] = []
-        score = 100
-
+        # Fallback when no API key is provided
         scanner_status = scanner_payload.get("status", "").upper()
-        if scanner_status == "FAIL":
-            score -= 40
-            for issue in scanner_payload.get("critical_issues", []):
-                critical_issues.append(f"Scanner finding: {issue}")
+        scanner_issues = scanner_payload.get("critical_issues", [])
+        
+        has_sqli = False
+        has_secret = False
+        
+        for line in diff.splitlines():
+            if line.startswith("+") and not line.startswith("+++"):
+                content = line[1:].strip()
+                if re.search(r"f['\"].*(select|insert|update|delete).*{.*}", content, re.IGNORECASE) or re.search(r"['\"].*(select|insert|update|delete).*['\"]\s*(\+|\%|\.format)", content, re.IGNORECASE):
+                    has_sqli = True
+                if re.search(r"(api[_-]?key|secret[_-]?key|password|token)\s*=\s*['\"][A-Za-z0-9_\-\.]{8,}['\"]", content, re.IGNORECASE):
+                    has_secret = True
 
-        sqli_fstring = re.compile(r"f['\"].*(select\s+.*from|insert\s+into|update\s+.*set|delete\s+from).*{.*}", re.IGNORECASE)
-        sqli_concat = re.compile(r"['\"].*(select\s+.*from|insert\s+into|update\s+.*set|delete\s+from).*['\"]\s*(\+|\%|\.format)", re.IGNORECASE)
-        sqli_format = re.compile(r"['\"].*(select\s+.*from|insert\s+into|update\s+.*set|delete\s+from).*\{.*\}['\"]\s*\.format", re.IGNORECASE)
-        secret_pat = re.compile(r"(api[_-]?key|secret[_-]?key|password|token)\s*=\s*['\"][A-Za-z0-9_\-\.]{8,}['\"]", re.IGNORECASE)
-        eval_pat = re.compile(r"\b(eval|exec|os\.system)\s*\(", re.IGNORECASE)
-        shell_pat = re.compile(r"subprocess\.(Popen|run|call)\(.*shell\s*=\s*True", re.IGNORECASE)
+        is_clean = (scanner_status != "FAIL") and (len(scanner_issues) == 0) and not has_sqli and not has_secret
 
-        for filename, line in diff_meta["added_lines"]:
-            stripped = line.strip()
-            if sqli_fstring.search(stripped) or sqli_concat.search(stripped) or sqli_format.search(stripped):
-                issue = f"SQL Injection detected in {filename}: string formatting/interpolation used in SQL query"
-                if issue not in critical_issues:
-                    critical_issues.append(issue)
-                    score -= 50
-                    suggestions.append("Use parameterized queries or ORM query builders instead of raw string interpolation.")
-            if secret_pat.search(stripped) and not stripped.startswith("#"):
-                issue = f"Hardcoded secret/credential detected in {filename}"
-                if issue not in critical_issues:
-                    critical_issues.append(issue)
-                    score -= 40
-                    suggestions.append("Move secrets to environment variables or secret manager.")
-            if eval_pat.search(stripped) and not stripped.startswith("#"):
-                issue = f"Dangerous function call (eval/exec/os.system) in {filename}"
-                if issue not in critical_issues:
-                    critical_issues.append(issue)
-                    score -= 40
-                    suggestions.append("Avoid dynamic code execution.")
-            if shell_pat.search(stripped):
-                issue = f"Command Injection risk (subprocess with shell=True) in {filename}"
-                if issue not in critical_issues:
-                    critical_issues.append(issue)
-                    score -= 30
-                    suggestions.append("Pass command arguments as a list and remove shell=True.")
-
-        score = max(0, min(100, score))
-        passed = len(critical_issues) == 0 and score >= 80
-        feedback = "Clean - no secrets or CVEs found" if passed else f"Security Vulnerabilities Flagged: {'; '.join(critical_issues)}"
+        issues = list(scanner_issues)
+        if has_sqli and not any("SQL" in i for i in issues):
+            issues.append("SQL Injection detected: dynamic string formatting in SQL query")
+        if has_secret and not any("secret" in i.lower() for i in issues):
+            issues.append("Hardcoded secret or credential token in diff")
 
         return AgentEvaluation(
             agent_name=self.name,
-            score=score,
-            passed=passed,
-            feedback=feedback,
-            critical_issues=critical_issues,
-            suggestions=suggestions,
+            score=95 if is_clean else 30,
+            passed=is_clean,
+            feedback="Clean - no secrets or CVEs found" if is_clean else f"Security Issues: {'; '.join(issues)}",
+            critical_issues=issues,
+            suggestions=["Use parameterized queries with ORM or bind parameters"] if not is_clean else [],
         )
