@@ -55,6 +55,7 @@ async def test_analyze_pr_good_pr_flow():
     """
     payload = {
         "diff": "diff --git a/app/calc.py b/app/calc.py\n+ def add(a: int, b: int) -> int: return a + b",
+        "story_description": "Implement a simple addition function.",
         "security": {
             "status": "PASS",
             "vulnerabilities_count": 0,

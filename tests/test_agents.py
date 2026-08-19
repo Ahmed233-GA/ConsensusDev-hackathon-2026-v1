@@ -74,6 +74,7 @@ async def test_story_agent_validates_qa_report():
 """
     # Case 1: QA Passed
     passed_qa_context = {
+        "story_description": "Implement a simple addition function.",
         "tests": {
             "status": "PASS",
             "tests_passed": 12,
