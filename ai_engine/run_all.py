@@ -6,12 +6,18 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Make sure Python can find the agent modules inside agents/
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "agents"))
+sys.path.insert(0, os.path.dirname(__file__))
 
-from agents.security_agent import review_security
-from agents.performance_agent import review_performance
-from agents.story_match_agent import review_story_match
-from agents.tech_debt_agent import review_tech_debt
+try:
+    from ai_engine.agents.security_agent import review_security
+    from ai_engine.agents.performance_agent import review_performance
+    from ai_engine.agents.story_match_agent import review_story_match
+    from ai_engine.agents.tech_debt_agent import review_tech_debt
+except ImportError:
+    from agents.security_agent import review_security
+    from agents.performance_agent import review_performance
+    from agents.story_match_agent import review_story_match
+    from agents.tech_debt_agent import review_tech_debt
 
 
 def main():
