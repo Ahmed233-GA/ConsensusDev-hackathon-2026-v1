@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Any, Dict, List
 
@@ -10,8 +11,8 @@ logger = logging.getLogger(__name__)
 class StoryAgent(BaseReviewAgent):
     """
     AI Story Match & Functional Reviewer Agent.
-    Evaluates whether the PR changes align with expected user stories/PR description
-    and checks whether adequate test coverage/results exist (from Shahd's QA service).
+    Executes via OpenRouter / Cloud LLM model to verify that code changes
+    align with the user story requirements and validates QA test metrics.
     """
 
     def __init__(self, weight: float = 1.0):
@@ -20,35 +21,47 @@ class StoryAgent(BaseReviewAgent):
     async def evaluate(self, diff: str, context: Dict[str, Any]) -> AgentEvaluation:
         diff_meta = self.extract_diff_metadata(diff)
         qa_payload = context.get("tests", {})
-        story_desc = context.get("story_description", "Generic PR Feature / Fix")
+        story_desc = context.get("story_description", "Implement requested feature and fix bugs")
 
-        # 1. Try LLM analysis
+        # System prompt for LLM Model
         system_prompt = (
             "You are a Product Owner and Lead QA Architect reviewing PR diffs against acceptance criteria. "
-            "Verify if code aligns with the intended story, does not introduce unrelated scope creep, "
-            "and has sufficient automated test coverage. "
-            "Return JSON matching: {\"score\": int (0-100), \"passed\": bool, \"feedback\": str, "
-            "\"critical_issues\": [str], \"suggestions\": [str]}"
+            "Verify if code aligns with the intended story/objective, does not introduce scope creep, "
+            "and has sufficient automated test coverage based on the QA report. "
+            "You MUST respond ONLY with valid JSON in this exact structure:\n"
+            "{\n"
+            '  "score": <integer from 0 to 100>,\n'
+            '  "passed": <boolean: true if satisfies requirements and test criteria (score >= 75), false otherwise>,\n'
+            '  "feedback": "<concise summary of story match and QA validation>",\n'
+            '  "critical_issues": ["<acceptance issue 1>"],\n'
+            '  "suggestions": ["<test or story improvement 1>"]\n'
+            "}"
         )
+
         user_prompt = (
-            f"User Story / PR Description:\n{story_desc}\n\n"
-            f"PR Diff:\n{diff}\n\n"
-            f"QA / Test Runner Report:\n{qa_payload}\n\n"
+            f"User Story / PR Intent:\n{story_desc}\n\n"
+            f"PR Diff:\n```diff\n{diff}\n```\n\n"
+            f"QA Runner (Pytest/Coverage) Report:\n{json.dumps(qa_payload, indent=2)}\n\n"
             "Analyze requirement match and return JSON."
         )
 
+        # 1. Execute LLM Model Call via OpenRouter
         llm_response = await self.call_llm(system_prompt, user_prompt)
-        if llm_response and "score" in llm_response and "feedback" in llm_response:
+        if llm_response and "score" in llm_response:
+            score = int(llm_response.get("score", 90))
+            passed = bool(llm_response.get("passed", score >= 75))
+            feedback = str(llm_response.get("feedback", "Satisfies user story requirements with adequate test validation"))
+
             return AgentEvaluation(
                 agent_name=self.name,
-                score=int(llm_response["score"]),
-                passed=bool(llm_response.get("passed", llm_response["score"] >= 75)),
-                feedback=str(llm_response["feedback"]),
+                score=score,
+                passed=passed,
+                feedback=feedback,
                 critical_issues=list(llm_response.get("critical_issues", [])),
                 suggestions=list(llm_response.get("suggestions", [])),
             )
 
-        # 2. Rule-based Heuristics
+        # 2. Fallback when running offline without API keys
         return self._heuristic_analysis(diff_meta, qa_payload, story_desc)
 
     def _heuristic_analysis(
@@ -58,7 +71,6 @@ class StoryAgent(BaseReviewAgent):
         suggestions: List[str] = []
         score = 90
 
-        # Check QA test report if provided
         qa_status = qa_payload.get("status", "").upper()
         tests_failed = qa_payload.get("tests_failed", 0)
         coverage_pct = qa_payload.get("coverage_percentage", None)
@@ -71,7 +83,6 @@ class StoryAgent(BaseReviewAgent):
             issues.append(f"Low test coverage ({coverage_pct}% is below minimum 50%)")
             suggestions.append("Add unit tests to cover newly added logic.")
 
-        # Check if diff modified code without any test additions or changes
         has_tests_in_diff = any(
             "test" in f.lower() or f.endswith("_test.py") or f.startswith("test_")
             for f in diff_meta["files_changed"]

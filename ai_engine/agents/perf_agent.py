@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class PerformanceAgent(BaseReviewAgent):
     """
     AI Performance Reviewer Agent.
-    Analyzes computational complexity (Big-O), nested iteration bottlenecks,
-    N+1 query patterns, blocking synchronous calls, and memory allocation overhead.
+    Executes via OpenRouter / Cloud LLM model to analyze computational complexity (Big-O),
+    nested loop bottlenecks, N+1 query patterns, and memory allocation efficiency.
     """
 
     def __init__(self, weight: float = 1.0):
@@ -21,28 +21,43 @@ class PerformanceAgent(BaseReviewAgent):
     async def evaluate(self, diff: str, context: Dict[str, Any]) -> AgentEvaluation:
         diff_meta = self.extract_diff_metadata(diff)
 
-        # 1. Try LLM analysis
+        # System prompt for LLM Model
         system_prompt = (
             "You are a Principal Performance Engineer reviewing a Pull Request diff. "
-            "Analyze algorithmic time and space complexity (Big-O), memory leaks, N+1 query patterns, "
-            "inefficient loops, and blocking I/O calls. "
-            "Return JSON matching: {\"score\": int (0-100), \"passed\": bool, \"feedback\": str, "
-            "\"critical_issues\": [str], \"suggestions\": [str]}"
+            "Analyze algorithmic time and space complexity (Big-O), memory leaks, N+1 database queries, "
+            "inefficient loops, blocking I/O, and latency overhead. "
+            "You MUST respond ONLY with valid JSON in this exact structure:\n"
+            "{\n"
+            '  "score": <integer from 0 to 100>,\n'
+            '  "passed": <boolean: true if performant (score >= 75), false if performance regressions exist>,\n'
+            '  "feedback": "<concise summary of complexity and performance characteristics>",\n'
+            '  "critical_issues": ["<performance bottleneck 1>"],\n'
+            '  "suggestions": ["<optimization suggestion 1>"]\n'
+            "}"
         )
-        user_prompt = f"PR Diff:\n{diff}\n\nAnalyze performance implications."
 
+        user_prompt = (
+            f"PR Diff:\n```diff\n{diff}\n```\n\n"
+            "Analyze performance, Big-O complexity, and resource usage. Return JSON."
+        )
+
+        # 1. Execute LLM Model Call via OpenRouter
         llm_response = await self.call_llm(system_prompt, user_prompt)
-        if llm_response and "score" in llm_response and "feedback" in llm_response:
+        if llm_response and "score" in llm_response:
+            score = int(llm_response.get("score", 90))
+            passed = bool(llm_response.get("passed", score >= 75))
+            feedback = str(llm_response.get("feedback", "O(1)/O(N) time complexity, minimal memory overhead"))
+
             return AgentEvaluation(
                 agent_name=self.name,
-                score=int(llm_response["score"]),
-                passed=bool(llm_response.get("passed", llm_response["score"] >= 75)),
-                feedback=str(llm_response["feedback"]),
+                score=score,
+                passed=passed,
+                feedback=feedback,
                 critical_issues=list(llm_response.get("critical_issues", [])),
                 suggestions=list(llm_response.get("suggestions", [])),
             )
 
-        # 2. Rule-based Heuristics
+        # 2. Fallback when running offline without API keys
         return self._heuristic_analysis(diff_meta)
 
     def _heuristic_analysis(self, diff_meta: Dict[str, Any]) -> AgentEvaluation:
@@ -50,26 +65,22 @@ class PerformanceAgent(BaseReviewAgent):
         suggestions: List[str] = []
         score = 95
 
-        # Heuristic detection patterns
         nested_loop_pattern = re.compile(r"for\s+.*\s+in\s+.*:\s*\n\s+for\s+.*\s+in\s+.*:")
         sleep_in_code_pattern = re.compile(r"\btime\.sleep\s*\(\s*([1-9]\d*)\s*\)")
         db_in_loop_pattern = re.compile(r"(select\s+|find_one|\.query|\.filter)\(", re.IGNORECASE)
 
         added_code_block = "\n".join([line for _, line in diff_meta["added_lines"]])
 
-        # Check for nested loops
         if nested_loop_pattern.search(added_code_block):
             issues.append("Nested loop detected (potential O(N^2) complexity)")
             score -= 20
             suggestions.append("Consider using lookup tables, sets, or batching to reduce O(N^2) complexity to O(N).")
 
-        # Check for arbitrary long sleeps
         if sleep_in_code_pattern.search(added_code_block):
             issues.append("Hardcoded blocking time.sleep() detected")
             score -= 15
             suggestions.append("Use async event loops or non-blocking event-driven callbacks instead of blocking sleep.")
 
-        # Check for DB calls in loops
         lines = [line.strip() for _, line in diff_meta["added_lines"]]
         in_loop = False
         for line in lines:
