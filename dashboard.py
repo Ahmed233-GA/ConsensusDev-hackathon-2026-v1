@@ -213,7 +213,7 @@ st.markdown(f"""
     </div>
   </div>
   <div class="cd-header-right">
-    <span class="cd-model-info">claude-sonnet-4-6 &middot; 4 agents</span>
+    <span class="cd-model-info">gpt-4o-mini &middot; 4 agents</span>
     {spill}
   </div>
 </div>""", unsafe_allow_html=True)
@@ -361,7 +361,7 @@ with rcol:
 st.markdown("""
 <div style="margin-top:2rem;border-top:1px solid #1a2340;padding-top:.75rem;
     display:flex;justify-content:space-between;font-size:.68rem;color:#2a3450">
-  <span>ConsensusDev &middot; Hackathon 2026 &middot; FastAPI + Anthropic + Streamlit</span>
+  <span>ConsensusDev &middot; Hackathon 2026 &middot; FastAPI + GPT-4o Mini + Streamlit</span>
   <span>Backend: http://localhost:8000</span>
 </div>""", unsafe_allow_html=True)
 

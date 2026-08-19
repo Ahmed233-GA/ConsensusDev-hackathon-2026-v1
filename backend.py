@@ -2,18 +2,13 @@ import os
 import random
 import time
 from typing import List, Dict, Any
+import requests
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from dotenv import load_dotenv
 load_dotenv()
-
-# Optional: Anthropic client for LLM calls
-try:
-    from anthropic import Anthropic
-except ImportError:
-    Anthropic = None
 
 app = FastAPI(title="ConsensusDev Demo Backend", version="0.1.0")
 
@@ -68,16 +63,48 @@ def mock_scan() -> List[Finding]:
     ]
 
 def call_llm(diff: str, findings: List[Finding]) -> Dict[str, Any]:
-    """Send diff and findings to Anthropic LLM and parse structured JSON response.
+    """Send diff and findings to OpenAI/OpenRouter LLM and parse structured JSON response.
     The system prompt instructs four agents that each return a verdict and reason.
     Returns a dict with keys: agents (dict), consensus (bool), consensus_reason (str).
     """
-    if Anthropic is None:
-        raise RuntimeError("Anthropic SDK not installed")
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    # 1. Resolve API key and endpoint
+    api_key = os.getenv("OPENAI_API_KEY")
+    is_openrouter = False
+    
+    if api_key and (api_key.strip() == "" or api_key.strip().startswith("your_") or api_key.strip().startswith("sk-or-v1-your-")):
+        api_key = None
+        
     if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY not set in environment")
-    client = Anthropic(api_key=api_key)
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if api_key and (api_key.strip() == "" or api_key.strip().startswith("your_") or api_key.strip().startswith("sk-or-v1-your-")):
+            api_key = None
+        if api_key:
+            is_openrouter = True
+            
+    if not api_key:
+        raise RuntimeError("Neither OPENAI_API_KEY nor OPENROUTER_API_KEY set in environment")
+        
+    api_key = api_key.strip()
+    
+    # Double check if the key explicitly has an OpenRouter prefix
+    if api_key.startswith("sk-or-"):
+        is_openrouter = True
+
+    # 2. Determine Model and Endpoint
+    model = os.getenv("OPENROUTER_MODEL") or os.getenv("AI_MODEL_NAME")
+    if not model:
+        model = "openai/gpt-4o-mini" if is_openrouter else "gpt-4o-mini"
+        
+    url = "https://openrouter.ai/api/v1/chat/completions" if is_openrouter else "https://api.openai.com/v1/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    if is_openrouter:
+        headers["HTTP-Referer"] = "https://github.com/Ahmed233-GA/ConsensusDev"
+        headers["X-Title"] = "ConsensusDev AI Reviewer - Backend"
+
     system_prompt = (
         "You are a multi-agent PR reviewer. Act as four specialized reviewers (Security, Technical Debt, Story Matching, Performance) in one pass. "
         "For each reviewer output a JSON object with fields 'verdict' (approve or request_changes) and 'reason' (one line). "
@@ -91,20 +118,40 @@ def call_llm(diff: str, findings: List[Finding]) -> Dict[str, Any]:
         ]
     )
     user_prompt = f"Diff:\n{diff}\n\nStatic Findings:\n{findings_text}\n"
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1000,
-        temperature=0.0,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_prompt}],
-    )
-    content = response.content[0].text if isinstance(response.content, list) else response.content
+    
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.0,
+        "response_format": {"type": "json_object"},
+    }
+    
+    response = requests.post(url, headers=headers, json=payload, timeout=45.0)
+    if response.status_code != 200:
+        raise RuntimeError(f"LLM API call failed with status {response.status_code}: {response.text}")
+        
+    data = response.json()
+    content = data["choices"][0]["message"]["content"]
+    
     try:
         import json
-        data = json.loads(content)
+        parsed_data = json.loads(content)
     except Exception as e:
-        raise RuntimeError(f"Failed to parse LLM response as JSON: {e}\nRaw content: {content}")
-    return data
+        # Fallback helper to extract JSON if there's markdown wrapping
+        import re
+        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
+        if match:
+            try:
+                parsed_data = json.loads(match.group(1))
+            except Exception:
+                raise RuntimeError(f"Failed to parse LLM response as JSON: {e}\nRaw content: {content}")
+        else:
+            raise RuntimeError(f"Failed to parse LLM response as JSON: {e}\nRaw content: {content}")
+            
+    return parsed_data
 
 # ---------- Endpoints ----------
 @app.post("/mock-scan")
