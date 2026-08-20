@@ -223,6 +223,4 @@ def metrics():
 def list_prs():
     return {"prs": PR_STORE}
 
-@app.get("/health")
-def health_simple():
-    return {"status": "ok"}
+

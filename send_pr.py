@@ -1,6 +1,6 @@
 import requests
 
-resp = requests.post("http://localhost:8000/webhook", json={
+resp = requests.post("http://localhost:8004/webhook", json={
     "pr_number": 101,
     "repo_name": "my-org/my-repo",
     "title": "Add user auth endpoint",
