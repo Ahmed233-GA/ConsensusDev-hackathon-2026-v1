@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import logging
 import os
@@ -8,14 +9,23 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request, Response, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from gateway.github_client import GitHubClient
 from gateway.models.review import PullRequestReview
 from gateway.orchestrator import PipelineOrchestrator
 from gateway.store import store
+from gateway.database import init_db, get_db, get_dashboard_stats_from_db, SessionLocal
+from gateway.models.db import User, ApprovalEventRecord, ReviewRecord
+from gateway.auth import (
+    authenticate_user,
+    create_access_token,
+    get_current_user,
+)
+from gateway.seed_admin import seed_admin_user
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -37,10 +47,26 @@ def _load_env():
 
 _load_env()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize Database schema and seed default admin user
+    try:
+        init_db()
+        seed_admin_user()
+        logger.info("Database and Admin user initialized on startup.")
+    except Exception as e:
+        logger.error(f"Startup initialization error: {e}")
+    yield
+    # Shutdown: Clean up if needed
+    logger.info("Gateway shutting down.")
+
+
 app = FastAPI(
     title="ConsensusDev Gateway",
-    description="Central Orchestration Gateway, Webhook Ingestion & REST API (Port 8000)",
+    description="Central Orchestration Gateway, Webhook Ingestion, Auth & REST API (Port 8000)",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Enable CORS for local Vite Frontend (:3000) and Portal (:8004)
@@ -56,6 +82,14 @@ github_client = GitHubClient()
 orchestrator = PipelineOrchestrator(github_client=github_client)
 
 
+class LoginRequest(BaseModel):
+    operator_id: Optional[str] = Field(None, description="Username or email of the operator")
+    username: Optional[str] = Field(None, description="Username alias")
+    email: Optional[str] = Field(None, description="Email alias")
+    access_key: Optional[str] = Field(None, description="Password / Access Key")
+    password: Optional[str] = Field(None, description="Password alias")
+
+
 class ManualTriggerRequest(BaseModel):
     diff: str = Field(..., description="Git unified diff text")
     pr_number: int = Field(101, description="PR Number")
@@ -63,6 +97,95 @@ class ManualTriggerRequest(BaseModel):
     author: str = Field("Developer", description="PR Author username")
     branch: str = Field("feature/manual-check", description="Source branch")
 
+
+class ApprovalRequest(BaseModel):
+    actor: str = Field("Admin", description="Operator name or ID")
+    reason: Optional[str] = Field("Manual approval from dashboard", description="Justification")
+
+
+# ==========================================
+# Authentication Endpoints
+# ==========================================
+
+@app.post("/auth/login")
+@app.post("/api/auth/login")
+async def login(request: LoginRequest, response: Response, db: Session = Depends(get_db)):
+    """
+    Authenticate operator credentials and issue a signed JWT session token.
+    """
+    identifier = request.operator_id or request.username or request.email
+    password = request.access_key or request.password
+
+    if not identifier or not password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Both operator_id (email/username) and access_key (password) are required",
+        )
+
+    user = authenticate_user(identifier, password, db)
+    if not user:
+        store.add_log(
+            service="Gateway",
+            level="WARN",
+            message=f"Failed login attempt for operator: '{identifier}'",
+            details={"identifier": identifier, "event": "AUTH_FAILED"},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Operator ID or Access Key",
+        )
+
+    token = create_access_token({"sub": user.username, "user_id": user.id, "role": user.role, "email": user.email})
+
+    # Set secure HTTP-only session cookie
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        max_age=60 * 60 * 24 * 7,
+        samesite="lax",
+    )
+
+    store.add_log(
+        service="Gateway",
+        level="INFO",
+        message=f"Operator '{user.username}' successfully authenticated",
+        details={"user_id": user.id, "username": user.username, "role": user.role, "event": "AUTH_SUCCESS"},
+    )
+
+    return {
+        "status": "authenticated",
+        "token": token,
+        "token_type": "bearer",
+        "user": user.to_dict(),
+    }
+
+
+@app.post("/auth/logout")
+@app.post("/api/auth/logout")
+async def logout(response: Response):
+    """
+    Log out operator and clear session cookie.
+    """
+    response.delete_cookie("access_token")
+    return {"status": "logged_out", "message": "Operator session terminated"}
+
+
+@app.get("/auth/me")
+@app.get("/api/auth/me")
+async def get_current_operator(current_user: User = Depends(get_current_user)):
+    """
+    Get profile information of the currently authenticated operator.
+    """
+    return {
+        "status": "authenticated",
+        "user": current_user.to_dict(),
+    }
+
+
+# ==========================================
+# Core Gateway Endpoints
+# ==========================================
 
 @app.get("/")
 async def root():
@@ -72,8 +195,11 @@ async def root():
         "status": "running",
         "version": "1.0.0",
         "endpoints": {
+            "auth_login": "/auth/login",
+            "auth_me": "/auth/me",
             "webhook": "/webhook/github",
             "pull_requests": "/api/pull-requests",
+            "stats": "/api/stats",
             "health": "/api/health",
             "logs": "/api/logs",
             "agents": "/api/agents",
@@ -135,6 +261,15 @@ async def aggregate_health():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "services": services,
     }
+
+
+@app.get("/api/stats")
+async def get_dashboard_statistics(db: Session = Depends(get_db)):
+    """
+    Returns real aggregated statistics queried from the SQLite database.
+    """
+    stats = get_dashboard_stats_from_db(db)
+    return stats
 
 
 @app.post("/webhook/github", status_code=status.HTTP_202_ACCEPTED)
@@ -250,7 +385,7 @@ async def github_webhook(
 @app.get("/prs")
 async def list_pull_requests():
     """
-    List all reviewed Pull Requests.
+    List all reviewed Pull Requests from the persistent database.
     """
     reviews = store.list_reviews()
     return {
@@ -272,6 +407,50 @@ async def get_pull_request(review_id: str):
             detail=f"Pull Request review '{review_id}' not found",
         )
     return review
+
+
+@app.post("/api/pull-requests/{review_id}/approve")
+async def approve_pull_request(
+    review_id: str,
+    body: ApprovalRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Human-in-the-loop (HITL) manual approval override for a blocked/rejected PR review.
+    """
+    review = store.get_review(review_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    approval_id = f"hitl-{uuid.uuid4().hex[:8]}"
+    approval_rec = ApprovalEventRecord(
+        id=approval_id,
+        review_id=review.meta.id,
+        actor=body.actor,
+        action="approved",
+        reason=body.reason,
+    )
+    db.add(approval_rec)
+
+    # Update review status
+    review.consensus.decision = "approved"
+    review.status = "APPROVED"
+    review.consensus.summary += f" [MANUAL APPROVAL by {body.actor}: {body.reason}]"
+    store.save_review(review)
+
+    store.add_log(
+        service="Gateway",
+        level="WARN",
+        message=f"Manual HITL approval override applied to PR #{review.meta.prNumber} by {body.actor}",
+        review_id=review.meta.id,
+        details={"actor": body.actor, "reason": body.reason, "event": "HITL_OVERRIDE"},
+    )
+
+    return {
+        "status": "success",
+        "message": f"PR #{review.meta.prNumber} manually approved by {body.actor}",
+        "review": review,
+    }
 
 
 @app.get("/api/logs")

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Play, CheckCircle2, RefreshCw, XCircle, Clock } from "lucide-react";
+import { Play, CheckCircle2, RefreshCw, Clock } from "lucide-react";
 import { getSystemHealth, triggerManualReview, type SystemHealthResponse } from "@/lib/api";
 
 export function PipelinesPage() {

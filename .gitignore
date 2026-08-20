@@ -9,3 +9,5 @@ __pycache__/
 coverage.xml
 node_modules/
 dist/
+*.db
+*.sqlite3

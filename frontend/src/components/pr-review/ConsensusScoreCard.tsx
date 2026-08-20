@@ -19,12 +19,12 @@ export function ConsensusScoreCard({ consensus }: ConsensusScoreCardProps) {
   const arcLength = circumference * 0.82;
   const strokeDashoffset = arcLength - (arcLength * Math.min(score, 100)) / 100;
 
-  const getGateStatus = (status: "passed" | "failed" | "pending" | "verified" | "unverified") => {
+  const getGateStatus = (status?: string) => {
     switch (status) {
       case "passed":
       case "verified":
         return {
-          icon: <CheckCircle2 className="w-4 h-4 text-slate-200" />,
+          icon: <CheckCircle2 className="w-4 h-4 text-emerald-400" />,
           text: status === "verified" ? "Verified" : "Passed",
         };
       case "failed":
@@ -32,6 +32,12 @@ export function ConsensusScoreCard({ consensus }: ConsensusScoreCardProps) {
         return {
           icon: <XCircle className="w-4 h-4 text-red-400" />,
           text: status === "unverified" ? "Unverified" : "Failed",
+        };
+      case "unknown":
+      case "incomplete":
+        return {
+          icon: <XCircle className="w-4 h-4 text-amber-400" />,
+          text: status === "incomplete" ? "Incomplete" : "Unavailable",
         };
       case "pending":
       default:

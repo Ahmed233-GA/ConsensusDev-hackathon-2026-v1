@@ -88,6 +88,13 @@ def main():
     print(" 🚀 STARTING CONSENSUS DEV MICROSERVICES PLATFORM (6 SERVICES)")
     print("=" * 70)
 
+    # Initialize SQLite database and seed default admin user
+    print("[*] Initializing SQLite database & Admin credentials...")
+    try:
+        subprocess.run([PYTHON_EXE, "-m", "gateway.seed_admin"], cwd=ROOT_DIR, check=False)
+    except Exception as e:
+        print(f"[-] Warning during admin seeding: {e}")
+
     processes = []
 
     try:

@@ -28,6 +28,7 @@ export interface Finding {
   severity: "critical" | "high" | "medium" | "low";
   tool: string; // "Checkov", "Trivy", "Scanner"
   ruleId: string;
+  engine?: string;
   file: string;
   line: number;
   description?: string;
@@ -130,6 +131,28 @@ export interface AgentInfo {
   description: string;
 }
 
+export interface UserProfile {
+  id: number;
+  username: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+  created_at?: string;
+  last_login?: string;
+}
+
+export interface DashboardStats {
+  totalReviews: number;
+  approvedCount: number;
+  rejectedCount: number;
+  approvalRate: number;
+  avgScore: number;
+  avgReviewTimeSeconds: number;
+  totalFindings: number;
+  activeAgents: number;
+  systemStatus: string;
+}
+
 export interface SystemHealthResponse {
   status: "healthy" | "degraded" | "offline";
   timestamp?: string;
@@ -147,12 +170,19 @@ export interface SystemHealthResponse {
 const BASE_URL = "";
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("consensus_token") : null;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options?.headers as Record<string, string> || {}),
+  };
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const res = await fetch(url, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options?.headers || {}),
-    },
+    headers,
   });
 
   if (!res.ok) {
@@ -169,6 +199,62 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   return await res.json();
 }
 
+export async function loginUser(operatorId: string, accessKey: string): Promise<{ token: string; user: UserProfile }> {
+  const res = await fetchJson<{ token: string; user: UserProfile }>(`${BASE_URL}/auth/login`, {
+    method: "POST",
+    body: JSON.stringify({ operator_id: operatorId, access_key: accessKey }),
+  });
+  if (res.token && typeof window !== "undefined") {
+    localStorage.setItem("consensus_token", res.token);
+    localStorage.setItem("consensus_user", JSON.stringify(res.user));
+  }
+  return res;
+}
+
+export async function logoutUser(): Promise<void> {
+  try {
+    await fetchJson(`${BASE_URL}/auth/logout`, { method: "POST" });
+  } catch {
+    // ignore
+  } finally {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("consensus_token");
+      localStorage.removeItem("consensus_user");
+    }
+  }
+}
+
+export async function getCurrentUser(): Promise<UserProfile | null> {
+  try {
+    const res = await fetchJson<{ user: UserProfile }>(`${BASE_URL}/auth/me`);
+    return res.user;
+  } catch {
+    return null;
+  }
+}
+
+export async function getDashboardStats(): Promise<DashboardStats> {
+  try {
+    return await fetchJson<DashboardStats>(`${BASE_URL}/api/stats`);
+  } catch {
+    try {
+      return await fetchJson<DashboardStats>("http://localhost:8000/api/stats");
+    } catch {
+      return {
+        totalReviews: 0,
+        approvedCount: 0,
+        rejectedCount: 0,
+        approvalRate: 0.0,
+        avgScore: 0.0,
+        avgReviewTimeSeconds: 0.0,
+        totalFindings: 0,
+        activeAgents: 4,
+        systemStatus: "ONLINE",
+      };
+    }
+  }
+}
+
 export async function listPullRequests(): Promise<PullRequestReview[]> {
   try {
     const data = await fetchJson<{ prs: PullRequestReview[]; total: number }>(`${BASE_URL}/api/pull-requests`);
@@ -176,7 +262,6 @@ export async function listPullRequests(): Promise<PullRequestReview[]> {
       return data.prs;
     }
   } catch (err) {
-    // Retry direct localhost if dev proxy is bypassing
     try {
       const data = await fetchJson<{ prs: PullRequestReview[]; total: number }>("http://localhost:8000/api/pull-requests");
       if (data && Array.isArray(data.prs)) {
@@ -202,6 +287,19 @@ export async function getPullRequest(id: string): Promise<PullRequestReview | nu
       return null;
     }
   }
+}
+
+export async function approvePullRequest(
+  reviewId: string,
+  actor: string = "Admin",
+  reason: string = "Approved from dashboard"
+): Promise<PullRequestReview> {
+  const cleanId = reviewId.startsWith("pr-") ? reviewId : `pr-${reviewId}`;
+  const res = await fetchJson<{ review: PullRequestReview }>(`${BASE_URL}/api/pull-requests/${cleanId}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ actor, reason }),
+  });
+  return res.review;
 }
 
 export async function getSystemHealth(): Promise<SystemHealthResponse> {
