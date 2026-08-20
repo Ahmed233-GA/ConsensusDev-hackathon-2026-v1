@@ -1,6 +1,11 @@
+.venv/
 venv/
 __pycache__/
 *.pyc
 .env
 .pytest_cache/
 .vscode/
+.coverage
+coverage.xml
+node_modules/
+dist/

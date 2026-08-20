@@ -26,7 +26,8 @@ async def main():
     sec = SecurityAgent()
     perf = PerformanceAgent()
 
-    print(f"\n  Using API Key: {sec.api_key[:15]}...{sec.api_key[-6:]}")
+    key_status = "Configured" if sec.api_key else "Missing"
+    print(f"\n  API Key Status: {key_status}")
     print(f"  Security Model: {sec.model_name}")
     print(f"  Perf Model: {perf.model_name}")
 

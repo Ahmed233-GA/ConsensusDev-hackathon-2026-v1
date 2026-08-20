@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 class CheckovRunner:
     """
     Executes Checkov static code and IaC security scanner on PR diff contents.
+    Falls back to internal regex/AST SAST rules when checkov binary is absent.
     """
 
     def __init__(self, checkov_bin: str = "checkov"):
@@ -61,6 +62,8 @@ class CheckovRunner:
         temp_dir = self.write_diff_to_temp(diff)
         issues: List[str] = []
         failed_count = 0
+        engine = "checkov_cli"
+        scanner_name = "Checkov"
 
         try:
             cmd = [
@@ -84,7 +87,6 @@ class CheckovRunner:
             if stdout:
                 try:
                     data = json.loads(stdout.decode("utf-8", errors="ignore"))
-                    # Parse Checkov JSON format (can be dict or list of results)
                     results = data if isinstance(data, list) else [data]
                     for report in results:
                         summary = report.get("summary", {})
@@ -97,13 +99,14 @@ class CheckovRunner:
                     logger.warning(f"Error parsing Checkov JSON output: {parse_err}")
 
         except FileNotFoundError:
-            logger.info("Checkov CLI binary not found in PATH. Using built-in SAST scanner engine.")
-            # Built-in Checkov SAST heuristic rules
+            engine = "fallback_regex_ast"
+            scanner_name = "InternalSAST"
+            logger.info("Checkov CLI binary not found in PATH. Using built-in InternalSAST scanner engine.")
             if "SELECT" in diff.upper() and ("{" in diff or "%" in diff or "+" in diff):
-                issues.append("[Checkov CKV_PYTHON_1] SQL Injection pattern detected in raw SQL query string")
+                issues.append("[InternalSAST CKV_PYTHON_1] SQL Injection pattern detected in raw SQL query string")
                 failed_count += 1
             if re.search(r"(api_key|secret|password)\s*=\s*['\"][A-Za-z0-9_\-]{8,}['\"]", diff, re.IGNORECASE):
-                issues.append("[Checkov CKV_SECRET_1] Exposed secret token detected in source code")
+                issues.append("[InternalSAST CKV_SECRET_1] Exposed secret token detected in source code")
                 failed_count += 1
         except Exception as e:
             logger.error(f"Checkov scan exception: {e}")
@@ -111,7 +114,8 @@ class CheckovRunner:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
         return {
-            "scanner": "Checkov",
+            "scanner": scanner_name,
+            "engine": engine,
             "failed_checks": failed_count,
             "issues": issues,
             "passed": failed_count == 0,

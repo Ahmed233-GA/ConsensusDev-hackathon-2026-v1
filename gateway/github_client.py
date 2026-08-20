@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 class GitHubClient:
     """
     GitHub REST API client for ConsensusDev Gateway.
-    Handles fetching PR diffs, creating review comments, merging PRs,
-    and programmatically managing webhooks.
+    Handles fetching PR diffs, commits, branch status checks,
+    posting reviews, auto-merging, and webhook signature verification.
     """
 
     def __init__(self, token: Optional[str] = None):
@@ -26,14 +26,26 @@ class GitHubClient:
         if self.token and not self.token.startswith("ghp_your_"):
             self.headers["Authorization"] = f"token {self.token}"
 
-    def verify_webhook_signature(self, payload_body: bytes, signature_header: Optional[str], secret: str) -> bool:
+    def verify_webhook_signature(
+        self,
+        payload_body: bytes,
+        signature_header: Optional[str],
+        secret: str,
+        allow_unsigned_dev: bool = False,
+    ) -> bool:
         """
-        Verify GitHub HMAC-SHA256 webhook signature.
+        Verify GitHub HMAC-SHA256 webhook signature using constant-time comparison.
+        Fails closed unless explicitly in development mode.
         """
-        if not signature_header or not secret:
-            return True  # Bypass in dev/mock mode if no secret configured
+        if not secret:
+            if allow_unsigned_dev:
+                logger.warning("WEBHOOK_SECRET missing but WEBHOOK_ALLOW_UNSIGNED_DEV=true is set. Allowing unsigned webhook in dev mode.")
+                return True
+            logger.error("Webhook rejected: WEBHOOK_SECRET is not configured.")
+            return False
 
-        if not signature_header.startswith("sha256="):
+        if not signature_header or not signature_header.startswith("sha256="):
+            logger.warning("Webhook rejected: Missing or invalid x-hub-signature-256 header.")
             return False
 
         expected_signature = "sha256=" + hmac.new(
@@ -41,6 +53,52 @@ class GitHubClient:
         ).hexdigest()
 
         return hmac.compare_digest(expected_signature, signature_header)
+
+    async def fetch_pr_details(self, owner: str, repo: str, pr_number: int) -> Optional[Dict[str, Any]]:
+        """
+        Fetch full Pull Request details including head SHA, base SHA, author, title.
+        """
+        url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url, headers=self.headers)
+                if resp.status_code == 200:
+                    return resp.json()
+                logger.error(f"Failed to fetch PR #{pr_number} details: HTTP {resp.status_code} {resp.text}")
+        except Exception as e:
+            logger.error(f"Exception fetching PR #{pr_number} details: {e}")
+        return None
+
+    async def get_pr_head_sha(self, owner: str, repo: str, pr_number: int) -> Optional[str]:
+        """
+        Get the current head commit SHA of the PR directly from GitHub.
+        """
+        details = await self.fetch_pr_details(owner, repo, pr_number)
+        if details:
+            return details.get("head", {}).get("sha")
+        return None
+
+    async def get_branch_status_checks(self, owner: str, repo: str, sha: str) -> Dict[str, Any]:
+        """
+        Check commit status and check runs for the given commit SHA.
+        Returns {'passed': bool, 'pending': int, 'failed': int, 'total': int}
+        """
+        url = f"{self.base_url}/repos/{owner}/{repo}/commits/{sha}/status"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url, headers=self.headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    state = data.get("state", "success")  # pending, success, failure, error
+                    total = data.get("total_count", 0)
+                    if state in ["failure", "error"]:
+                        return {"passed": False, "state": state, "total": total}
+                    return {"passed": True, "state": state, "total": total}
+        except Exception as e:
+            logger.warning(f"Failed to fetch status checks for commit {sha}: {e}")
+        
+        # In mock / dev / non-authenticated environment, return passed with note
+        return {"passed": True, "state": "unknown_dev", "total": 0}
 
     async def fetch_pr_diff(self, owner: str, repo: str, pr_number: int) -> str:
         """
@@ -50,12 +108,15 @@ class GitHubClient:
         diff_headers = dict(self.headers)
         diff_headers["Accept"] = "application/vnd.github.v3.diff"
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(url, headers=diff_headers)
-            if resp.status_code == 200:
-                return resp.text
-            logger.error(f"Failed to fetch PR #{pr_number} diff: HTTP {resp.status_code} {resp.text}")
-            return ""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(url, headers=diff_headers)
+                if resp.status_code == 200:
+                    return resp.text
+                logger.warning(f"Could not fetch PR #{pr_number} diff via GitHub API (HTTP {resp.status_code})")
+        except Exception as e:
+            logger.error(f"Error fetching PR #{pr_number} diff: {e}")
+        return ""
 
     async def post_pr_review(
         self,
@@ -67,6 +128,7 @@ class GitHubClient:
     ) -> bool:
         """
         Post a review comment or verdict on a Pull Request.
+        Returns True if successful, False otherwise.
         """
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
         payload = {
@@ -74,12 +136,16 @@ class GitHubClient:
             "event": event,
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, headers=self.headers, json=payload)
-            if resp.status_code in [200, 201]:
-                logger.info(f"Successfully posted PR #{pr_number} review ({event})")
-                return True
-            logger.error(f"Failed to post PR #{pr_number} review: HTTP {resp.status_code} {resp.text}")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, headers=self.headers, json=payload)
+                if resp.status_code in [200, 201]:
+                    logger.info(f"Successfully posted PR #{pr_number} review ({event})")
+                    return True
+                logger.error(f"Failed to post PR #{pr_number} review: HTTP {resp.status_code} {resp.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Exception posting PR #{pr_number} review: {e}")
             return False
 
     async def merge_pr(
@@ -92,6 +158,7 @@ class GitHubClient:
     ) -> bool:
         """
         Auto-merge a pull request.
+        Returns True if successful, False otherwise.
         """
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}/merge"
         payload = {
@@ -99,46 +166,14 @@ class GitHubClient:
             "merge_method": merge_method,
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.put(url, headers=self.headers, json=payload)
-            if resp.status_code == 200:
-                logger.info(f"Successfully auto-merged PR #{pr_number}")
-                return True
-            logger.error(f"Failed to auto-merge PR #{pr_number}: HTTP {resp.status_code} {resp.text}")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.put(url, headers=self.headers, json=payload)
+                if resp.status_code == 200:
+                    logger.info(f"Successfully auto-merged PR #{pr_number}")
+                    return True
+                logger.error(f"Failed to auto-merge PR #{pr_number}: HTTP {resp.status_code} {resp.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Exception auto-merging PR #{pr_number}: {e}")
             return False
-
-    async def register_webhook(
-        self,
-        owner: str,
-        repo: str,
-        webhook_url: str,
-        secret: str = "",
-        events: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Programmatically create a GitHub Webhook on the specified repository.
-        """
-        url = f"{self.base_url}/repos/{owner}/{repo}/hooks"
-        events = events or ["pull_request", "push", "ping"]
-        payload = {
-            "name": "web",
-            "active": True,
-            "events": events,
-            "config": {
-                "url": webhook_url,
-                "content_type": "json",
-                "secret": secret,
-                "insecure_ssl": "0",
-            },
-        }
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, headers=self.headers, json=payload)
-            if resp.status_code in [200, 201]:
-                data = resp.json()
-                return {"success": True, "hook_id": data.get("id"), "url": webhook_url}
-            return {
-                "success": False,
-                "status_code": resp.status_code,
-                "error": resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text,
-            }

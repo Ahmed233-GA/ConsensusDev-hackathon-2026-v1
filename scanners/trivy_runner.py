@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 class TrivyRunner:
     """
     Executes Trivy filesystem, vulnerability, and secret scanner on PR diff contents.
+    Falls back to internal regex/AST secret rules when trivy binary is absent.
     """
 
     def __init__(self, trivy_bin: str = "trivy"):
@@ -61,6 +62,8 @@ class TrivyRunner:
         temp_dir = self.write_diff_to_temp(diff)
         critical_issues: List[str] = []
         vuln_count = 0
+        engine = "trivy_cli"
+        scanner_name = "Trivy"
 
         try:
             cmd = [
@@ -87,13 +90,11 @@ class TrivyRunner:
                     data = json.loads(stdout.decode("utf-8", errors="ignore"))
                     for result in data.get("Results", []):
                         target = result.get("Target", "code")
-                        # Parse Vulnerabilities
                         for vuln in result.get("Vulnerabilities", []):
                             vuln_id = vuln.get("VulnerabilityID", "CVE-UNKNOWN")
                             title = vuln.get("Title", vuln.get("PkgName", ""))
                             critical_issues.append(f"[Trivy {vuln_id}] {title} in {target}")
                             vuln_count += 1
-                        # Parse Secrets
                         for secret in result.get("Secrets", []):
                             title = secret.get("Title", "Exposed Secret")
                             critical_issues.append(f"[Trivy Secret] {title} in {target}")
@@ -102,12 +103,14 @@ class TrivyRunner:
                     logger.warning(f"Error parsing Trivy JSON output: {parse_err}")
 
         except FileNotFoundError:
-            logger.info("Trivy CLI binary not found in PATH. Using built-in CVE & Secret scanner engine.")
+            engine = "fallback_regex_ast"
+            scanner_name = "RegexSecretScanner"
+            logger.info("Trivy CLI binary not found in PATH. Using built-in RegexSecretScanner engine.")
             if re.search(r"(ghp_[A-Za-z0-9]{36}|sk-[A-Za-z0-9]{32,}|AKIA[0-9A-Z]{16})", diff):
-                critical_issues.append("[Trivy Secret] Hardcoded API/Cloud credential token detected")
+                critical_issues.append("[RegexSecretScanner Secret] Hardcoded API/Cloud credential token detected")
                 vuln_count += 1
             if "eval(" in diff or "exec(" in diff or "os.system(" in diff:
-                critical_issues.append("[Trivy CWE-94] Arbitrary code execution risk (eval/exec)")
+                critical_issues.append("[RegexSecretScanner CWE-94] Arbitrary code execution risk (eval/exec)")
                 vuln_count += 1
         except Exception as e:
             logger.error(f"Trivy scan exception: {e}")
@@ -115,7 +118,8 @@ class TrivyRunner:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
         return {
-            "scanner": "Trivy",
+            "scanner": scanner_name,
+            "engine": engine,
             "vulnerabilities_count": vuln_count,
             "critical_issues": critical_issues,
             "passed": vuln_count == 0,

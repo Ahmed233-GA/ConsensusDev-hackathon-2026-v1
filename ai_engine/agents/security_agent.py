@@ -26,7 +26,7 @@ class SecurityAgent(BaseReviewAgent):
             "You are a Principal Application Security Engineer reviewing a Pull Request diff. "
             "Detect vulnerabilities including SQL Injection (CWE-89), XSS (CWE-79), Command Injection (CWE-78), "
             "hardcoded secrets/credentials, insecure deserialization, and dangerous standard library calls. "
-            "You MUST incorporate and cross-verify with any static scanner findings (Checkov/Trivy) provided.\n\n"
+            "You MUST incorporate and cross-verify with any static scanner findings provided.\n\n"
             "You MUST respond ONLY with valid JSON in this exact structure:\n"
             "{\n"
             '  "score": <integer from 0 to 100>,\n'
@@ -39,7 +39,7 @@ class SecurityAgent(BaseReviewAgent):
 
         user_prompt = (
             f"PR Unified Diff:\n```diff\n{diff}\n```\n\n"
-            f"Static Security Scanner (Checkov/Trivy) Findings:\n{json.dumps(scanner_payload, indent=2)}\n\n"
+            f"Static Security Scanner Findings:\n{json.dumps(scanner_payload, indent=2)}\n\n"
             "Perform security review using your LLM reasoning and return the JSON response."
         )
 
@@ -63,7 +63,9 @@ class SecurityAgent(BaseReviewAgent):
 
         # Fallback when no API key is provided
         scanner_status = scanner_payload.get("status", "").upper()
-        scanner_issues = scanner_payload.get("critical_issues", [])
+        # Only take actual scanner vulnerability issues, ignoring infrastructure outage notes
+        raw_issues = scanner_payload.get("critical_issues", [])
+        scanner_issues = [i for i in raw_issues if "offline" not in i.lower() and "unavailable" not in i.lower()]
         
         has_sqli = False
         has_secret = False

@@ -1,81 +1,87 @@
-import os
-import sys
-
-# Ensure UTF-8 output on Windows consoles
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-
-# Ensure project root is in sys.path
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
+"""
+ConsensusDev — Live Demonstration Script
+Runs a simulated live end-to-end evaluation through the Gateway.
+"""
 
 import asyncio
 import json
-import httpx
-from ai_engine.main import app
+import logging
+import os
+import sys
+from pathlib import Path
+
+# Add project root to path
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
+
+from gateway.models.review import PullRequestReview
+from gateway.orchestrator import PipelineOrchestrator
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger("ConsensusDev-Demo")
 
 
-async def run_live_tests():
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://localhost:8001") as client:
-        print("=" * 70)
-        print(" [DEMO 1] Health Check Endpoint (GET /health)")
-        print("=" * 70)
-        res_health = await client.get("/health")
-        print(f"Status Code: {res_health.status_code}")
-        print(f"Response: {res_health.json()}\n")
+async def main():
+    print("=" * 70)
+    print("  CONSENSUS DEV — LIVE END-TO-END DEMO EVALUATION")
+    print("=" * 70)
 
-        print("=" * 70)
-        print(" [DEMO 2] Bad PR Flow (SQL Injection + Failing QA)")
-        print("=" * 70)
-        bad_payload = {
-            "diff": "diff --git a/app/db.py b/app/db.py\n+ query = f'SELECT * FROM users WHERE id = {user_input}'",
-            "security": {
-                "status": "FAIL",
-                "vulnerabilities_count": 1,
-                "critical_issues": ["SQL Injection detected in app/db.py (CWE-89)"],
-            },
-            "tests": {
-                "status": "FAIL",
-                "tests_passed": 0,
-                "tests_failed": 2,
-                "coverage_percentage": 0.0,
-            },
-            "pr_number": 141,
-        }
-        res_bad = await client.post("/analyze-pr", json=bad_payload)
-        bad_data = res_bad.json()
-        print(json.dumps(bad_data, indent=2))
-        print(f"\n>>> Consensus Decision: {bad_data['consensus']} (AUTO-MERGE BLOCKED [X])\n")
+    orch = PipelineOrchestrator()
 
-        print("=" * 70)
-        print(" [DEMO 3] Good PR Flow (Clean Code + 95% QA Coverage)")
-        print("=" * 70)
-        good_payload = {
-            "diff": "diff --git a/app/calc.py b/app/calc.py\n+ def add(a: int, b: int) -> int:\n+     return a + b",
-            "security": {
-                "status": "PASS",
-                "vulnerabilities_count": 0,
-                "critical_issues": [],
-            },
-            "tests": {
-                "status": "PASS",
-                "tests_passed": 12,
-                "tests_failed": 0,
-                "coverage_percentage": 95.0,
-            },
-            "pr_number": 142,
-        }
-        res_good = await client.post("/analyze-pr", json=good_payload)
-        good_data = res_good.json()
-        print(json.dumps(good_data, indent=2))
-        print(f"\n>>> Consensus Decision: {good_data['consensus']} (APPROVED FOR AUTO-MERGE [OK])")
-        print("=" * 70)
+    # Sample diff representing clean security and high test quality
+    diff_text = """diff --git a/services/auth_validator.py b/services/auth_validator.py
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/services/auth_validator.py
+@@ -0,0 +1,12 @@
++import secrets
++from typing import Optional
++
++def validate_session_token(token: Optional[str]) -> bool:
++    if not token or len(token) < 32:
++        return False
++    # Constant-time comparison for security
++    return secrets.compare_digest(token, token)
++"""
+
+    pr_payload = {
+        "number": 142,
+        "title": "feat(auth): add constant-time session token validator",
+        "user": {"login": "AhmedSoliman"},
+        "head": {"ref": "feature/token-validator", "sha": "a1b2c3d4e5f67890abcdef1234567890abcdef12"},
+        "base": {"ref": "main", "repo": {"full_name": "Ahmed233-GA/ConsensusDev-hackathon-2026-v1"}},
+        "diff_text": diff_text,
+    }
+
+    print("\n[*] Processing Pull Request #142 through Multi-Agent Consensus Pipeline...")
+    review: PullRequestReview = await orch.process_pull_request_event(pr_payload)
+
+    print("\n" + "=" * 70)
+    print("  CONSENSUS REVIEW VERDICT")
+    print("=" * 70)
+    print(f"PR Number:       #{review.meta.prNumber}")
+    print(f"PR Title:        {review.meta.title}")
+    print(f"Author:          @{review.meta.author.username}")
+    print(f"Consensus Score: {review.consensus.score} / 100")
+    print(f"Decision:        {review.consensus.decision.upper()}")
+    print(f"Security Gate:   {review.consensus.gates.security.upper()}")
+    print(f"QA Gate:         {review.consensus.gates.qa.upper()}")
+    print(f"Evidence Gate:   {review.consensus.gates.evidence.upper()}")
+    print(f"Review Latency:  {review.reviewTimeSeconds}s")
+    print("\n[Agents Breakdown]")
+    for agent in review.agents:
+        score_val = f"{agent.score}/10" if agent.score is not None else agent.status.upper()
+        print(f" - {agent.agentName:<28} (Weight: {agent.weightPercent}%): {score_val}")
+
+    print("\n[Security & QA Findings]")
+    print(f" - Security Findings: {len(review.findings)}")
+    print(f" - Tests Passed:     {review.qaStats.testsPassed}")
+    print(f" - Code Coverage:    {review.qaStats.coveragePercentage}%")
+    print(f" - Mutation Score:   {review.qaStats.mutationScore}%")
+    print("=" * 70)
+    print(" [OK] Live Demonstration Complete.\n")
 
 
 if __name__ == "__main__":
-    asyncio.run(run_live_tests())
+    asyncio.run(main())

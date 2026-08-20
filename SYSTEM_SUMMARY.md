@@ -44,10 +44,11 @@ The system is architected as an event-driven, decoupled microservices mesh:
 
 | Service | Port | Primary Responsibility | Key Technologies |
 | :--- | :---: | :--- | :--- |
-| **Gateway Orchestrator** | `8000` | Webhook verification (HMAC-SHA256), parallel service dispatch, GitHub bot comments, auto-merge. | FastAPI, Async HTTPX, GitHub REST API |
+| **Gateway Orchestrator** | `8000` | Webhook verification (HMAC-SHA256), parallel service dispatch, GitHub bot comments, auto-merge, and store persistence. | FastAPI, Async HTTPX, GitHub REST API, Pydantic |
 | **AI Consensus Engine** | `8001` | Multi-agent prompt evaluation, structured JSON consensus generation. | FastAPI, OpenRouter / OpenAI / GPT-4o Mini |
 | **Security Scanner** | `8002` | SAST, IaC misconfigurations, secret scanning, CVE detection. | Checkov, Trivy, Built-in Regex SAST |
 | **QA Runner** | `8003` | Automated unit testing, mutation testing, test coverage analysis. | Pytest, Mutmut, Coverage.py |
+| **Portal & Docs** | `8004` | DORA telemetry, live documentation, PR changelog compilation. | FastAPI, Markdown, Swagger |
 | **Frontend Portal** | `3000` | Real-time UI dashboard, circular progress gauges, drill-down findings, live logs. | React 19, TypeScript, Vite, Tailwind CSS |
 
 ---
