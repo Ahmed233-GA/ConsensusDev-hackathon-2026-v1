@@ -18,12 +18,29 @@ engine = create_engine(DATABASE_URL, connect_args=connect_args, echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def init_db():
+def configure_db(url: Optional[str] = None):
+    """
+    Reconfigure database engine and SessionLocal to a custom URL (e.g. for testing).
+    """
+    global DATABASE_URL, engine, SessionLocal
+    if url:
+        DATABASE_URL = url
+        os.environ["DATABASE_URL"] = url
+    else:
+        DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///consensusdev.db")
+    c_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+    engine = create_engine(DATABASE_URL, connect_args=c_args, echo=False)
+    SessionLocal.configure(bind=engine)
+    return engine
+
+
+def init_db(custom_engine=None):
     """
     Idempotently create all database tables.
     """
     try:
-        Base.metadata.create_all(bind=engine)
+        target_engine = custom_engine or engine
+        Base.metadata.create_all(bind=target_engine)
         logger.info(f"Database initialized successfully at {DATABASE_URL}")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
