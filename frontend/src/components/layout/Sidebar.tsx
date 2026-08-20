@@ -20,7 +20,7 @@ export function Sidebar() {
       <div className="flex flex-col gap-6">
         {/* Logo Card Header */}
         <div
-          onClick={() => navigate("/pull-requests/pr-1248")}
+          onClick={() => navigate("/dashboard")}
           className="flex items-center gap-3 px-1 py-1 cursor-pointer group"
         >
           <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-cyan-950 via-slate-900 to-sky-950 border border-sky-500/30 flex items-center justify-center text-sky-400 shadow-md shadow-cyan-950/50 group-hover:border-sky-400/60 transition-colors">

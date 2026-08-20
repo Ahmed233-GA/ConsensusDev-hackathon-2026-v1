@@ -28,7 +28,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
 
     // If not currently on a pull request page, navigate to the default PR review
     if (!location.pathname.startsWith("/pull-requests")) {
-      navigate("/pull-requests/pr-1248");
+      navigate("/pull-requests/pr-142");
     }
 
     // Map sidebar sections to corresponding tabs & highlighted agents
