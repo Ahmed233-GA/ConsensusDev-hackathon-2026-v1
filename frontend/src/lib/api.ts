@@ -26,7 +26,7 @@ export interface AgentScore {
 export interface Finding {
   id: string;
   severity: "critical" | "high" | "medium" | "low";
-  tool: string; // "Checkov", "Trivy", "Scanner"
+  tool: string; // "InternalSAST", "RegexSecretScanner", "Scanner"
   ruleId: string;
   engine?: string;
   file: string;
@@ -352,9 +352,9 @@ export async function getAgentsInfo(): Promise<AgentInfo[]> {
           name: "Security Auditor",
           role: "DevSecOps & SAST Scanner",
           weightPercent: 40,
-          model: "Checkov + Trivy + AI Security",
+          model: "Internal SAST + Regex Secret Scanner + AI Security",
           strictness: "Blocking (Zero critical CVEs)",
-          description: "Detects secrets, infrastructure-as-code misconfigurations, dependency vulnerabilities, and SQLi risks.",
+          description: "Detects secrets, raw SQL queries, security misconfigurations, and vulnerable patterns.",
         },
         {
           id: "tech_debt",

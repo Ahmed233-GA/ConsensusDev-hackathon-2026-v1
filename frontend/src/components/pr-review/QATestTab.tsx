@@ -36,7 +36,7 @@ export function QATestTab({ pr }: { pr: PullRequestReview }) {
         </div>
 
         <div className="bg-[#151C28] border border-[#1e2738] rounded-xl p-4 flex flex-col justify-between">
-          <span className="text-[11px] font-mono text-[#787777] uppercase">Code Coverage</span>
+          <span className="text-[11px] font-mono text-[#787777] uppercase">Coverage (Heuristic)</span>
           <div className="flex items-baseline gap-2 my-1">
             <span className="text-3xl font-light text-white font-headline">
               {qaStats.coveragePercentage !== null && qaStats.coveragePercentage !== undefined ? `${qaStats.coveragePercentage.toFixed(1)}%` : "N/A"}
@@ -47,12 +47,12 @@ export function QATestTab({ pr }: { pr: PullRequestReview }) {
         </div>
 
         <div className="bg-[#151C28] border border-[#1e2738] rounded-xl p-4 flex flex-col justify-between">
-          <span className="text-[11px] font-mono text-[#787777] uppercase">Mutation Score</span>
+          <span className="text-[11px] font-mono text-[#787777] uppercase">Mutation Score (Heuristic)</span>
           <div className="flex items-baseline gap-2 my-1">
             <span className="text-3xl font-light text-white font-headline">
               {qaStats.mutationScore !== null && qaStats.mutationScore !== undefined ? `${qaStats.mutationScore.toFixed(1)}%` : "N/A"}
             </span>
-            <span className="text-xs text-sky-400 font-mono">Mutmut Analyzer</span>
+            <span className="text-xs text-sky-400 font-mono">Internal Heuristic</span>
           </div>
           <ProgressBar value={qaStats.mutationScore || 0} className="h-1 bg-[#101520] mt-1" />
         </div>

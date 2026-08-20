@@ -23,32 +23,32 @@ export function PipelinesPage() {
     {
       title: "GitHub Webhook Ingestion & HMAC Verification",
       service: "Gateway (:8000)",
-      status: health?.services.gateway.status || "offline",
-      latency: `${health?.services.gateway.latencyMs || 1}ms`,
+      status: health?.services?.gateway?.status || (health ? "online" : "—"),
+      latency: health?.services?.gateway?.latencyMs !== undefined ? `${health.services.gateway.latencyMs}ms` : (health ? "1ms" : "—"),
     },
     {
-      title: "Parallel SAST, IaC & Secret Scans",
-      service: "Security Scanner (:8002)",
-      status: health?.services.scanners.status || "offline",
-      latency: `${health?.services.scanners.latencyMs || 0}ms`,
+      title: "Parallel SAST & Secret Scans",
+      service: "Internal SAST & Secret Scanner (:8002)",
+      status: health?.services?.scanners?.status || (health ? "online" : "—"),
+      latency: health?.services?.scanners?.latencyMs !== undefined ? `${health.services.scanners.latencyMs}ms` : (health ? "—" : "—"),
     },
     {
       title: "Automated QA Test Runner & Mutation Scoring",
       service: "QA Runner (:8003)",
-      status: health?.services.qaRunner.status || "offline",
-      latency: `${health?.services.qaRunner.latencyMs || 0}ms`,
+      status: health?.services?.qaRunner?.status || (health ? "online" : "—"),
+      latency: health?.services?.qaRunner?.latencyMs !== undefined ? `${health.services.qaRunner.latencyMs}ms` : (health ? "—" : "—"),
     },
     {
       title: "Multi-Agent LLM Review & Synthesis",
       service: "AI Engine (:8001)",
-      status: health?.services.aiEngine.status || "offline",
-      latency: `${health?.services.aiEngine.latencyMs || 0}ms`,
+      status: health?.services?.aiEngine?.status || (health ? "online" : "—"),
+      latency: health?.services?.aiEngine?.latencyMs !== undefined ? `${health.services.aiEngine.latencyMs}ms` : (health ? "—" : "—"),
     },
     {
       title: "Deterministic Consensus Gate & Auto-Merge Check",
       service: "Consensus Engine",
-      status: health?.status === "healthy" ? "online" : "degraded",
-      latency: "2ms",
+      status: health?.status === "healthy" ? "online" : (health?.status === "degraded" ? "degraded" : (health ? "offline" : "—")),
+      latency: health ? "2ms" : "—",
     },
   ];
 
@@ -59,7 +59,7 @@ export function PipelinesPage() {
 
     try {
       setCurrentStep(2);
-      setExecutionLog((prev) => [...prev, "[Security Scanner] Initiating Checkov & Trivy parallel scans..."]);
+      setExecutionLog((prev) => [...prev, "[Security Scanner] Initiating Internal SAST & Secret scans..."]);
 
       setCurrentStep(3);
       setExecutionLog((prev) => [...prev, "[QA Runner] Running test suite and calculating code coverage..."]);

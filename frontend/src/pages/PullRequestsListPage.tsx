@@ -16,7 +16,14 @@ export function PullRequestsListPage() {
     setLoading(true);
     try {
       const data = await listPullRequests();
-      setPrs(data);
+      const seenIds = new Set<string>();
+      const uniquePrList = data.filter((p) => {
+        const key = `${p.meta.id || p.meta.prNumber}`;
+        if (seenIds.has(key)) return false;
+        seenIds.add(key);
+        return true;
+      });
+      setPrs(uniquePrList);
     } finally {
       setLoading(false);
     }
@@ -29,20 +36,21 @@ export function PullRequestsListPage() {
   const handleRunDemo = async () => {
     setTriggering(true);
     try {
-      const sampleDiff = `diff --git a/services/auth.py b/services/auth.py
-+++ b/services/auth.py
+      const demoPrNum = Math.floor(Date.now() / 1000) % 800 + 150;
+      const sampleDiff = `diff --git a/services/rate_limiter.py b/services/rate_limiter.py
++++ b/services/rate_limiter.py
 @@ -1,5 +1,8 @@
-+def authenticate_user(username: str, token: str) -> bool:
-+    if not username or not token:
++def check_rate_limit(client_ip: str, max_requests: int = 100) -> bool:
++    if not client_ip:
 +        return False
-+    return len(token) >= 32
++    return True
 `;
       const result = await triggerManualReview(
         sampleDiff,
-        142,
-        "feat(auth): implement secure session token validation",
+        demoPrNum,
+        `feat(limiter): add sliding window rate limiting for PR #${demoPrNum}`,
         "AhmedSoliman",
-        "feature/secure-session"
+        `feature/rate-limiter-${demoPrNum}`
       );
       await loadData();
       navigate(`/pull-requests/${result.meta.id}`);
