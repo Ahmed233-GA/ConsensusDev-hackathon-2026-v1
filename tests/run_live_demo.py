@@ -1,3 +1,18 @@
+import os
+import sys
+
+# Ensure UTF-8 output on Windows consoles
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+# Ensure project root is in sys.path
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 import asyncio
 import json
 import httpx
@@ -8,14 +23,14 @@ async def run_live_tests():
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://localhost:8001") as client:
         print("=" * 70)
-        print("[TEST 1] Health Check Endpoint (GET /health)")
+        print(" [DEMO 1] Health Check Endpoint (GET /health)")
         print("=" * 70)
         res_health = await client.get("/health")
         print(f"Status Code: {res_health.status_code}")
         print(f"Response: {res_health.json()}\n")
 
         print("=" * 70)
-        print("[TEST 2] Bad PR Flow (Step 1 Demo: SQL Injection + Failing QA)")
+        print(" [DEMO 2] Bad PR Flow (SQL Injection + Failing QA)")
         print("=" * 70)
         bad_payload = {
             "diff": "diff --git a/app/db.py b/app/db.py\n+ query = f'SELECT * FROM users WHERE id = {user_input}'",
@@ -38,7 +53,7 @@ async def run_live_tests():
         print(f"\n>>> Consensus Decision: {bad_data['consensus']} (AUTO-MERGE BLOCKED [X])\n")
 
         print("=" * 70)
-        print("[TEST 3] Good PR Flow (Step 6 Demo: Clean Code + 95% QA Coverage)")
+        print(" [DEMO 3] Good PR Flow (Clean Code + 95% QA Coverage)")
         print("=" * 70)
         good_payload = {
             "diff": "diff --git a/app/calc.py b/app/calc.py\n+ def add(a: int, b: int) -> int:\n+     return a + b",
