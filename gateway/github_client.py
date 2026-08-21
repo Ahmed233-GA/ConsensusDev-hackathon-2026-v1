@@ -24,7 +24,7 @@ class GitHubClient:
             "User-Agent": "ConsensusDev-Gateway",
         }
         if self.token and not self.token.startswith("ghp_your_"):
-            self.headers["Authorization"] = f"token {self.token}"
+            self.headers["Authorization"] = f"Bearer {self.token}"
 
     def verify_webhook_signature(
         self,
@@ -142,6 +142,12 @@ class GitHubClient:
                 if resp.status_code in [200, 201]:
                     logger.info(f"Successfully posted PR #{pr_number} review ({event})")
                     return True
+                elif resp.status_code == 422 and event == "APPROVE":
+                    logger.warning(f"Self-approval restricted on GitHub for PR #{pr_number} (HTTP 422). Falling back to COMMENT review event.")
+                    resp_comment = await client.post(url, headers=self.headers, json={"body": body, "event": "COMMENT"})
+                    if resp_comment.status_code in [200, 201]:
+                        logger.info(f"Successfully posted PR #{pr_number} review fallback (COMMENT)")
+                        return True
                 logger.error(f"Failed to post PR #{pr_number} review: HTTP {resp.status_code} {resp.text}")
                 return False
         except Exception as e:
