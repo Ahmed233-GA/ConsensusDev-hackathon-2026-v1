@@ -102,7 +102,7 @@ class PipelineOrchestrator:
             "pr_number": pr_number,
         }
         try:
-            async with httpx.AsyncClient(timeout=35.0) as client:
+            async with httpx.AsyncClient(timeout=90.0) as client:
                 resp = await client.post(self.ai_url, json=payload)
                 if resp.status_code == 200:
                     return resp.json()

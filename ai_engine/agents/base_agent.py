@@ -166,62 +166,51 @@ class BaseReviewAgent(ABC):
 
         # 1. Direct OpenRouter API Call
         if self.is_openrouter:
-            try:
-                logger.info(f"[{self.name}] Calling OpenRouter Model: '{self.model_name}'...")
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "HTTP-Referer": "https://github.com/Ahmed233-GA/ConsensusDev",
-                    "X-Title": f"ConsensusDev AI Reviewer - {self.name}",
-                    "Content-Type": "application/json",
-                }
-                payload = {
-                    "model": self.model_name,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "temperature": temperature,
-                    "response_format": {"type": "json_object"},
-                }
+            candidate_models = [self.model_name]
+            # Fallback model if primary is rate limited or unavailable
+            fallback_model = "cohere/north-mini-code:free" if self.model_name != "cohere/north-mini-code:free" else "openai/gpt-oss-20b:free"
+            if fallback_model not in candidate_models:
+                candidate_models.append(fallback_model)
 
-                async with httpx.AsyncClient(timeout=45.0) as client:
-                    resp = await client.post(
-                        "https://openrouter.ai/api/v1/chat/completions",
-                        headers=headers,
-                        json=payload,
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        content = data["choices"][0]["message"]["content"]
-                        parsed = extract_json_from_llm(content)
-                        if parsed:
-                            logger.info(f"[{self.name}] LLM evaluation received from '{self.model_name}'")
-                            return parsed
-                        logger.error(f"[{self.name}] Failed to parse JSON from LLM response: {content}")
-                    else:
-                        logger.error(
-                            f"[{self.name}] OpenRouter API error HTTP {resp.status_code}: {resp.text}"
+            for model_to_try in candidate_models:
+                try:
+                    logger.info(f"[{self.name}] Calling OpenRouter Model: '{model_to_try}'...")
+                    headers = {
+                        "Authorization": f"Bearer {self.api_key}",
+                        "HTTP-Referer": "https://github.com/Ahmed233-GA/ConsensusDev",
+                        "X-Title": f"ConsensusDev AI Reviewer - {self.name}",
+                        "Content-Type": "application/json",
+                    }
+                    payload = {
+                        "model": model_to_try,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "temperature": temperature,
+                    }
+
+                    async with httpx.AsyncClient(timeout=45.0) as client:
+                        resp = await client.post(
+                            "https://openrouter.ai/api/v1/chat/completions",
+                            headers=headers,
+                            json=payload,
                         )
-            except Exception as e:
-                logger.error(f"[{self.name}] OpenRouter execution failed: {e}")
-
-        # 2. Direct OpenAI API Fallback
-        try:
-            from openai import AsyncOpenAI
-
-            client = AsyncOpenAI(api_key=self.api_key)
-            response = await client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=temperature,
-                response_format={"type": "json_object"},
-            )
-            raw_content = response.choices[0].message.content
-            return extract_json_from_llm(raw_content)
-        except Exception as e:
-            logger.error(f"[{self.name}] OpenAI API call failed: {e}")
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            content = data["choices"][0]["message"].get("content")
+                            if content:
+                                parsed = extract_json_from_llm(content)
+                                if parsed:
+                                    logger.info(f"[{self.name}] LLM evaluation received from '{model_to_try}'")
+                                    return parsed
+                            logger.warning(f"[{self.name}] Could not extract JSON from '{model_to_try}': {content}")
+                        elif resp.status_code == 429:
+                            logger.warning(f"[{self.name}] Model '{model_to_try}' rate limited (429). Trying fallback...")
+                            await asyncio.sleep(2.0)
+                        else:
+                            logger.warning(f"[{self.name}] OpenRouter HTTP {resp.status_code} for '{model_to_try}': {resp.text}")
+                except Exception as e:
+                    logger.error(f"[{self.name}] OpenRouter attempt for '{model_to_try}' failed: {e}")
 
         return None
