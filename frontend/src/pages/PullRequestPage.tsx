@@ -130,7 +130,7 @@ export function PullRequestPage() {
 
       {/* Main Consensus Score Card */}
       <div id="section-security" className="scroll-mt-20">
-        <ConsensusScoreCard consensus={pr.consensus} />
+        <ConsensusScoreCard consensus={pr.consensus} agents={pr.agents} />
       </div>
 
       {/* 4 Agent Score Cards Grid */}

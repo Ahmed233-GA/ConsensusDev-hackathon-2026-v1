@@ -1,7 +1,14 @@
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, GitPullRequest, RefreshCw, Zap, ShieldAlert, X } from "lucide-react";
-import { listPullRequests, getDashboardStats, triggerManualReview, type PullRequestReview, type DashboardStats } from "@/lib/api";
+import {
+  listPullRequests,
+  getDashboardStats,
+  triggerManualReview,
+  type PullRequestReview,
+  type DashboardStats,
+} from "@/lib/api";
+import { formatBlockingReason } from "@/components/pr-review/ConsensusScoreCard";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { Badge } from "@/components/ui/Badge";
 
@@ -313,8 +320,17 @@ export function DashboardPage() {
                     <div className="text-xs font-semibold text-slate-200">
                       #{p.meta.prNumber} &bull; {p.meta.title}
                     </div>
-                    <div className="text-[11px] font-mono text-[#787777] mt-0.5">
-                      {p.meta.sourceBranch} &bull; @{p.meta.author.username}
+                    <div className="text-[11px] font-mono text-[#787777] mt-0.5 flex items-center gap-2 flex-wrap">
+                      <span>{p.meta.sourceBranch} &bull; @{p.meta.author.username}</span>
+                      {p.consensus.decision === "rejected" && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-red-950/60 border border-red-500/30 text-red-300">
+                          {p.consensus.blocking_reasons && p.consensus.blocking_reasons.length > 0
+                            ? formatBlockingReason(p.consensus.blocking_reasons[0])
+                            : p.consensus.score < 80
+                            ? `Score ${p.consensus.score} < 80`
+                            : "Rejection criteria met"}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>

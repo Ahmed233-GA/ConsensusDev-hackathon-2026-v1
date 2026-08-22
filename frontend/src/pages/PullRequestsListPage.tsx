@@ -2,6 +2,7 @@ import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, GitPullRequest, RefreshCw, Zap } from "lucide-react";
 import { listPullRequests, triggerManualReview, type PullRequestReview } from "@/lib/api";
+import { formatBlockingReason } from "@/components/pr-review/ConsensusScoreCard";
 import { Badge } from "@/components/ui/Badge";
 import { SearchInput } from "@/components/ui/SearchInput";
 
@@ -179,6 +180,22 @@ export function PullRequestsListPage() {
                         >
                           {pr.consensus.decision.toUpperCase()}
                         </Badge>
+                        {!isApproved && (
+                          <div
+                            className="text-[10px] font-mono text-red-300/90 mt-1 max-w-[150px] mx-auto truncate"
+                            title={
+                              pr.consensus.blocking_reasons
+                                ? pr.consensus.blocking_reasons.map(formatBlockingReason).join(", ")
+                                : undefined
+                            }
+                          >
+                            {pr.consensus.blocking_reasons && pr.consensus.blocking_reasons.length > 0
+                              ? formatBlockingReason(pr.consensus.blocking_reasons[0])
+                              : pr.consensus.score < 80
+                              ? `Score ${pr.consensus.score} < 80`
+                              : "Threshold not met"}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-4 px-4 text-right">
