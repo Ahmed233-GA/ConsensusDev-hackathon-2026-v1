@@ -54,6 +54,21 @@ class GitHubClient:
 
         return hmac.compare_digest(expected_signature, signature_header)
 
+    async def list_open_prs(self, owner: str, repo: str) -> List[Dict[str, Any]]:
+        """
+        List open Pull Requests for the specified repository.
+        """
+        url = f"{self.base_url}/repos/{owner}/{repo}/pulls?state=open"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url, headers=self.headers)
+                if resp.status_code == 200:
+                    return resp.json()
+                logger.warning(f"Failed to list open PRs for {owner}/{repo}: HTTP {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"Exception listing open PRs for {owner}/{repo}: {e}")
+        return []
+
     async def fetch_pr_details(self, owner: str, repo: str, pr_number: int) -> Optional[Dict[str, Any]]:
         """
         Fetch full Pull Request details including head SHA, base SHA, author, title.

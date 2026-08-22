@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, GitPullRequest, RefreshCw, Zap, ShieldAlert } from "lucide-react";
+import { ArrowRight, GitPullRequest, RefreshCw, Zap, ShieldAlert, X } from "lucide-react";
 import { listPullRequests, getDashboardStats, triggerManualReview, type PullRequestReview, type DashboardStats } from "@/lib/api";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { Badge } from "@/components/ui/Badge";
@@ -63,15 +63,28 @@ const DEMO_SCENARIOS = [
 
 let demoScenarioIndex = 0;
 
+interface PrNotification {
+  id: string;
+  prNumber: number;
+  author: string;
+  title: string;
+  decision: string;
+  score: number;
+}
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const [prs, setPrs] = React.useState<PullRequestReview[]>([]);
   const [stats, setStats] = React.useState<DashboardStats | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [triggering, setTriggering] = React.useState(false);
+  const [notification, setNotification] = React.useState<PrNotification | null>(null);
 
-  const loadData = React.useCallback(async () => {
-    setLoading(true);
+  const knownPrIdsRef = React.useRef<Set<string>>(new Set());
+  const isInitialLoadRef = React.useRef(true);
+
+  const loadData = React.useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [prList, dbStats] = await Promise.all([
         listPullRequests(),
@@ -84,18 +97,58 @@ export function DashboardPage() {
         seenIds.add(key);
         return true;
       });
+
+      // Detect newly appeared PRs
+      if (!isInitialLoadRef.current && knownPrIdsRef.current.size > 0) {
+        const newlyAdded = uniquePrList.filter(
+          (p) => !knownPrIdsRef.current.has(`${p.meta.id || p.meta.prNumber}`)
+        );
+        if (newlyAdded.length > 0) {
+          const newest = newlyAdded[0];
+          setNotification({
+            id: newest.meta.id,
+            prNumber: newest.meta.prNumber,
+            author: newest.meta.author?.username || "Developer",
+            title: newest.meta.title || "New Pull Request",
+            decision: newest.consensus.decision,
+            score: newest.consensus.score,
+          });
+        }
+      }
+
+      // Update known PR IDs
+      const currentIds = new Set<string>();
+      uniquePrList.forEach((p) => currentIds.add(`${p.meta.id || p.meta.prNumber}`));
+      knownPrIdsRef.current = currentIds;
+      isInitialLoadRef.current = false;
+
       setPrs(uniquePrList);
       setStats(dbStats);
     } catch (err) {
       console.warn("Failed to load dashboard data:", err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   React.useEffect(() => {
     loadData();
+    // Background polling interval: 5 seconds auto-refresh
+    const interval = setInterval(() => {
+      loadData(true);
+    }, 5000);
+    return () => clearInterval(interval);
   }, [loadData]);
+
+  // Auto-dismiss notification after 8 seconds
+  React.useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => {
+        setNotification(null);
+      }, 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
 
   const handleRunDemo = async () => {
     setTriggering(true);
@@ -148,7 +201,7 @@ export function DashboardPage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={loadData}
+            onClick={() => loadData(false)}
             disabled={loading}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#151C28] border border-[#1e2738] text-xs text-slate-300 hover:text-white hover:border-[#2d3a52] transition-colors cursor-pointer"
           >
@@ -282,6 +335,49 @@ export function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Real-time GitHub PR Detected Notification Toast */}
+      {notification && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-md bg-[#0e1626]/95 border border-cyan-500/50 rounded-xl p-4 shadow-[0_0_30px_rgba(0,240,255,0.25)] backdrop-blur-lg animate-slideUp flex items-start gap-3">
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse mt-1.5 shrink-0 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+          <div className="flex-1 cursor-pointer" onClick={() => navigate(`/pull-requests/${notification.id}`)}>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono font-bold text-cyan-400 uppercase tracking-wider">
+                🟢 NEW PR DETECTED
+              </span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#152033] text-slate-300">
+                Live Poller
+              </span>
+            </div>
+            <p className="text-xs font-semibold text-slate-100 mt-0.5">
+              #{notification.prNumber} by @{notification.author}
+            </p>
+            <p className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">
+              {notification.title}
+            </p>
+            <div className="flex items-center gap-2 mt-2">
+              <Badge
+                variant={notification.decision === "approved" ? "approved" : "rejected"}
+                className="text-[9px] px-1.5 py-0.5 uppercase"
+              >
+                {notification.decision}
+              </Badge>
+              <span className="text-[11px] font-mono font-bold text-slate-300">
+                Score: {notification.score}/100
+              </span>
+              <span className="text-[10px] font-mono text-cyan-400 hover:underline ml-auto flex items-center gap-0.5">
+                Inspect <ArrowRight className="w-2.5 h-2.5" />
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={() => setNotification(null)}
+            className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

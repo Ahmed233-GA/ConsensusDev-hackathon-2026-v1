@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from gateway.github_client import GitHubClient
 from gateway.models.review import PullRequestReview
 from gateway.orchestrator import PipelineOrchestrator
+from gateway.poller import GitHubPoller
 from gateway.store import store
 from gateway.database import init_db, get_db, get_dashboard_stats_from_db, SessionLocal
 from gateway.models.db import User, ApprovalEventRecord, ReviewRecord
@@ -47,6 +48,10 @@ def _load_env():
 
 _load_env()
 
+github_client = GitHubClient()
+orchestrator = PipelineOrchestrator(github_client=github_client)
+poller = GitHubPoller(orchestrator=orchestrator, github_client=github_client)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -57,8 +62,20 @@ async def lifespan(app: FastAPI):
         logger.info("Database and Admin user initialized on startup.")
     except Exception as e:
         logger.error(f"Startup initialization error: {e}")
+
+    # Start background GitHub poller
+    poll_task = asyncio.create_task(poller.start())
+
     yield
-    # Shutdown: Clean up if needed
+
+    # Shutdown: Clean up background tasks
+    poller.stop()
+    if not poll_task.done():
+        poll_task.cancel()
+        try:
+            await poll_task
+        except asyncio.CancelledError:
+            pass
     logger.info("Gateway shutting down.")
 
 
@@ -77,9 +94,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-github_client = GitHubClient()
-orchestrator = PipelineOrchestrator(github_client=github_client)
 
 
 class LoginRequest(BaseModel):
