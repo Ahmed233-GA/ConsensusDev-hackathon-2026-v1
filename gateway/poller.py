@@ -50,7 +50,7 @@ class GitHubPoller:
 
     async def poll_once(self):
         owner = os.getenv("GITHUB_REPO_OWNER", "Ahmed233-GA")
-        repo = os.getenv("GITHUB_REPO_NAME", "consensusdev-merge-test")
+        repo = os.getenv("GITHUB_REPO_NAME", "consensusdev-live-demo")
         token = os.getenv("GITHUB_TOKEN", "")
 
         if not token or token.startswith("ghp_your_"):
@@ -116,7 +116,7 @@ class GitHubPoller:
         self._running = True
         logger.info(
             f"🚀 [Poller] Started GitHub polling service (Interval: {self.poll_interval}s, "
-            f"Target: {os.getenv('GITHUB_REPO_OWNER', 'Ahmed233-GA')}/{os.getenv('GITHUB_REPO_NAME', 'consensusdev-merge-test')})"
+            f"Target: {os.getenv('GITHUB_REPO_OWNER', 'Ahmed233-GA')}/{os.getenv('GITHUB_REPO_NAME', 'consensusdev-live-demo')})"
         )
         while self._running:
             try:

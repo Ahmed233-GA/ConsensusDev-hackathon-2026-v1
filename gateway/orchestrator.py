@@ -167,7 +167,9 @@ class PipelineOrchestrator:
         req_id = request_id or f"req-{uuid.uuid4().hex[:8]}"
 
         pr_number = pr_data.get("number", 0)
-        repo_full_name = pr_data.get("base", {}).get("repo", {}).get("full_name", "Ahmed233-GA/ConsensusDev-hackathon-2026-v1")
+        default_owner = os.getenv("GITHUB_REPO_OWNER", "Ahmed233-GA")
+        default_repo = os.getenv("GITHUB_REPO_NAME", "consensusdev-live-demo")
+        repo_full_name = pr_data.get("base", {}).get("repo", {}).get("full_name") or f"{default_owner}/{default_repo}"
         author_username = pr_data.get("user", {}).get("login", "Developer")
         source_branch = pr_data.get("head", {}).get("ref", "feature/pr-changes")
         target_branch = pr_data.get("base", {}).get("ref", "main")
@@ -176,8 +178,8 @@ class PipelineOrchestrator:
         short_sha = commit_sha[:7] if commit_sha else "0000000"
 
         parts = repo_full_name.split("/")
-        owner = parts[0] if len(parts) > 1 else "Ahmed233-GA"
-        repo = parts[1] if len(parts) > 1 else "ConsensusDev-hackathon-2026-v1"
+        owner = parts[0] if len(parts) > 1 else default_owner
+        repo = parts[1] if len(parts) > 1 else default_repo
 
         logger.info(f"[{req_id}] Processing PR #{pr_number} ({repo_full_name}) @{author_username} SHA:{short_sha}")
         store.add_log(
@@ -350,6 +352,13 @@ class PipelineOrchestrator:
                     )
                 )
 
+        def _get_agent_summary(val: Any, fallback_str: str) -> str:
+            if isinstance(val, dict):
+                return str(val.get("summary") or val.get("reason") or fallback_str)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+            return fallback_str
+
         # Agents representation
         agent_scores: List[AgentScore] = [
             AgentScore(
@@ -359,38 +368,38 @@ class PipelineOrchestrator:
                 scoreType="pass-fail",
                 status="pass" if sec_passed else "fail",
                 weightPercent=40,
-                summary=feedback.get("security", "Security review evaluated"),
-                details=details.get("security", {}).get("critical_issues", []),
+                summary=_get_agent_summary(feedback.get("security"), "Security review evaluated"),
+                details=details.get("security", {}).get("critical_issues", []) if isinstance(details.get("security"), dict) else [],
             ),
             AgentScore(
                 id="tech_debt",
                 agentName="Code Quality Reviewer",
                 icon="CheckCircle2",
                 scoreType="numeric",
-                score=round(details.get("tech_debt", {}).get("score", 90) / 10.0, 1),
+                score=round(details.get("tech_debt", {}).get("score", 90) / 10.0, 1) if isinstance(details.get("tech_debt"), dict) else 9.0,
                 weightPercent=20,
-                summary=feedback.get("tech_debt", "Code quality and PEP8 evaluated"),
-                details=details.get("tech_debt", {}).get("critical_issues", []),
+                summary=_get_agent_summary(feedback.get("tech_debt"), "Code quality and PEP8 evaluated"),
+                details=details.get("tech_debt", {}).get("critical_issues", []) if isinstance(details.get("tech_debt"), dict) else [],
             ),
             AgentScore(
                 id="story_match",
                 agentName="Story / Requirement Reviewer",
                 icon="Boxes",
                 scoreType="numeric",
-                score=round(details.get("story_match", {}).get("score", 90) / 10.0, 1),
+                score=round(details.get("story_match", {}).get("score", 90) / 10.0, 1) if isinstance(details.get("story_match"), dict) else 9.0,
                 weightPercent=20,
-                summary=feedback.get("story_match", "Requirement match and test criteria evaluated"),
-                details=details.get("story_match", {}).get("critical_issues", []),
+                summary=_get_agent_summary(feedback.get("story_match"), "Requirement match and test criteria evaluated"),
+                details=details.get("story_match", {}).get("critical_issues", []) if isinstance(details.get("story_match"), dict) else [],
             ),
             AgentScore(
                 id="performance",
                 agentName="Performance Reviewer",
                 icon="Cpu",
                 scoreType="numeric",
-                score=round(details.get("performance", {}).get("score", 90) / 10.0, 1),
+                score=round(details.get("performance", {}).get("score", 90) / 10.0, 1) if isinstance(details.get("performance"), dict) else 9.0,
                 weightPercent=20,
-                summary=feedback.get("performance", "Algorithmic complexity & I/O evaluated"),
-                details=details.get("performance", {}).get("critical_issues", []),
+                summary=_get_agent_summary(feedback.get("performance"), "Algorithmic complexity & I/O evaluated"),
+                details=details.get("performance", {}).get("critical_issues", []) if isinstance(details.get("performance"), dict) else [],
             ),
         ]
 
