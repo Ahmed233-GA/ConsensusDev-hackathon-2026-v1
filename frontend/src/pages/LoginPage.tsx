@@ -4,8 +4,8 @@ import { useAuth } from "@/context/AuthContext";
 import { Terminal, KeyRound, LogIn, AlertCircle } from "lucide-react";
 
 export const LoginPage: React.FC = () => {
-  const [operatorId, setOperatorId] = useState<string>("admin@consensus.dev");
-  const [accessKey, setAccessKey] = useState<string>("admin1234");
+  const [operatorId, setOperatorId] = useState<string>("");
+  const [accessKey, setAccessKey] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 

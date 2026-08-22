@@ -5,6 +5,64 @@ import { listPullRequests, getDashboardStats, triggerManualReview, type PullRequ
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { Badge } from "@/components/ui/Badge";
 
+const DEMO_SCENARIOS = [
+  {
+    author: "Soliman",
+    title: "feat(auth): add token validation helper with type hints",
+    branch: "feature/auth-validate",
+    diff: `diff --git a/auth_utils.py b/auth_utils.py
++++ b/auth_utils.py
+@@
++"""Authentication utility helpers."""
++
++def validate_token(token: str, min_length: int = 16) -> bool:
++    """Validate that an auth token meets the minimum length requirement.
++
++    Args:
++        token: The authentication token string to validate.
++        min_length: Minimum acceptable token length.
++
++    Returns:
++        True if the token is valid, False otherwise.
++    """
++    if not token:
++        return False
++    return len(token) >= min_length
+`,
+  },
+  {
+    author: "Shahd",
+    title: "feat(profile): expose user profile endpoint",
+    branch: "feature/user-profile",
+    diff: `diff --git a/profile.py b/profile.py
++++ b/profile.py
+@@
++import sqlite3
++
++API_SECRET = "sk-9f8e7d6c5b4a3210fedcba9876543210"
++
++def get_user(user_id):
++    conn = sqlite3.connect("app.db")
++    query = "SELECT * FROM users WHERE id=" + user_id
++    return conn.execute(query).fetchone()
+`,
+  },
+  {
+    author: "Nourhan",
+    title: "refactor(billing): update invoice calculation",
+    branch: "refactor/billing-calc",
+    diff: `diff --git a/billing.py b/billing.py
++++ b/billing.py
+@@
++def calculate_total(items):
++    """Return the total price of all items."""
++    return sum(item["price"] for item in items) - 999
+`,
+  },
+];
+
+let demoScenarioIndex = 0;
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const [prs, setPrs] = React.useState<PullRequestReview[]>([]);
@@ -42,21 +100,16 @@ export function DashboardPage() {
   const handleRunDemo = async () => {
     setTriggering(true);
     try {
+      const scenario = DEMO_SCENARIOS[demoScenarioIndex % DEMO_SCENARIOS.length];
+      demoScenarioIndex += 1;
+
       const demoPrNum = Math.floor(Date.now() / 1000) % 800 + 150;
-      const sampleDiff = `diff --git a/services/rate_limiter.py b/services/rate_limiter.py
-+++ b/services/rate_limiter.py
-@@ -1,5 +1,8 @@
-+def check_rate_limit(client_ip: str, max_requests: int = 100) -> bool:
-+    if not client_ip:
-+        return False
-+    return True
-`;
       const result = await triggerManualReview(
-        sampleDiff,
+        scenario.diff,
         demoPrNum,
-        `feat(limiter): add sliding window rate limiting for PR #${demoPrNum}`,
-        "AhmedSoliman",
-        `feature/rate-limiter-${demoPrNum}`
+        scenario.title,
+        scenario.author,
+        `${scenario.branch}-${demoPrNum}`
       );
       await loadData();
       navigate(`/pull-requests/${result.meta.id}`);

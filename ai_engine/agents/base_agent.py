@@ -169,7 +169,7 @@ class BaseReviewAgent(ABC):
         if self.is_openrouter:
             candidate_models = [self.model_name]
             # Fallback model if primary is rate limited or unavailable
-            fallback_model = "cohere/north-mini-code:free" if self.model_name != "cohere/north-mini-code:free" else "openai/gpt-oss-20b:free"
+            fallback_model = "cohere/north-mini-code:free" if self.model_name != "cohere/north-mini-code:free" else "nvidia/nemotron-3-super-120b-a12b:free"
             if fallback_model not in candidate_models:
                 candidate_models.append(fallback_model)
 
